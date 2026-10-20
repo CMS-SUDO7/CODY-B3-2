@@ -10,9 +10,7 @@
 | `repository.py` | 커밋 모델, 브랜치·HEAD·커밋 상태, 알고리즘 연결 |
 | `algorithms.py` | 안정 병합 정렬, Kahn 위상 정렬, DFS 조상 탐색, BFS 최단 경로 |
 | `index.py` | 키워드·작성자 역색인 등록 및 조회 |
-| `docs/basic_knowledge.md` | 기초 문법, 자료구조, 복잡도, 학습 과제, 책 한 권 |
-| `docs/code_translation.md` | 처리 흐름과 최종 소스의 줄별 해설 |
-| `docs/verification.md` | 실제로 실행한 검증 범위와 결과 |
+
 
 `main()` → `execute()` → `Repository` → 알고리즘/역색인 → `main.py` 화면 출력 순서입니다. 조회 함수는 결과를 반환하고 화면 출력은 CLI에서 담당합니다.
 

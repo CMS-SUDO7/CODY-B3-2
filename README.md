@@ -18,13 +18,9 @@
 
 - Python 3.10 이상, 외부 패키지 설치 불필요
 - Python 표준 라이브러리: `shlex`, `dataclasses`, `datetime`, `collections.deque`
-- 그래프 전용 라이브러리와 `sorted()`, `list.sort()` 등 표준 정렬 API를 사용하지 않습니다.
-- 이 프로젝트에서는 `dict`, `set`, `list`가 허용됩니다. B3-1의 자료형 금지 조건을 적용하지 않습니다.
-- 실제 실행 검증 환경은 Linux / Python 3.12.14입니다. Python 3.10 구문으로도 분석했습니다.
+
 
 ## 3. 빠른 시작
-
-ZIP 압축을 푼 뒤 **`main.py`가 있는 `B3-2-mini-git` 폴더**에서 실행합니다.
 
 Windows PowerShell:
 
@@ -93,24 +89,7 @@ QUIT
 - 최단 경로가 여러 개면 `hash1->hash2->...` 문자열의 사전순이 가장 작은 경로를 고릅니다. 출력에 보이는 화살표 양쪽 공백은 가독성용입니다.
 - hash는 `00000001`부터 증가하는 16진수 식별자입니다. 최소 8자리이며 8자리를 넘어도 잘라내지 않습니다. 세션 내 중복이 없고 암호학적 내용 해시는 아닙니다.
 
-## 5. 출력 예시
-
-아래는 위 빠른 시작 명령에 대한 **설명용 예시**입니다. timestamp는 실행 시각의 UTC(`+00:00`) 값으로 달라집니다.
-
-```text
-mini-git> COMMIT "Initial commit"
-[main 00000001] Initial commit
-mini-git> PATH 00000002 00000003
-Path: 00000002 -> 00000001 -> 00000003
-mini-git> SEARCH "login"
-Found 1 commit(s)
-commit 00000002 (Alice Kim, <실행 시각>)
-  Add login feature
-```
-
-`LOG`에는 `hash / author / timestamp / message`가 모두 표시됩니다. 브랜치 이름은 커밋 생성 결과에 표시하며 LOG의 필수 필드는 아닙니다.
-
-## 6. 범위와 주의사항
+## 5. 범위와 주의사항
 
 - `INIT` 재입력은 `Repository already initialized`로 거부하여 기존 데이터를 보존합니다. 초기화하려면 종료 후 다시 실행합니다.
 - 원문의 사용자 변경 명령은 없으므로 CLI 세션에서는 INIT에 지정한 작성자를 계속 사용합니다. 작성자 정렬은 구현되어 있고 서로 다른 작성자는 모델 데이터로 별도 검증했습니다.
@@ -119,7 +98,7 @@ commit 00000002 (Alice Kim, <실행 시각>)
 - 파일 내용 추적, 네트워크 통신, 데이터 파일 저장은 구현 범위에 포함하지 않습니다. 실제 Git 저장소의 파일을 수정하지 않습니다.
 - 메모리나 사용자 인터페이스의 동시 접근을 제어하는 실제 서비스용 설계는 포함하지 않습니다.
 
-## 7. 오류 해결
+## 6. 오류 해결
 
 | 출력/문제 | 원인과 해결 |
 | --- | --- |
@@ -135,63 +114,3 @@ commit 00000002 (Alice Kim, <실행 시각>)
 | `main.py`를 찾을 수 없음 | `main.py`와 다른 `.py` 파일이 같은 폴더인지 확인 |
 
 오류를 출력한 뒤에도 다음 명령을 받을 수 있습니다. EOF 또는 Ctrl+C도 정상 종료로 처리합니다.
-
-## 8. 검증과 재현
-
-실제 결과는 [검증 기록](docs/verification.md)에 정리했습니다. 빠른 시작 명령으로 핵심 흐름을 재현할 수 있습니다. 추가 경계 사례는 새 실행에서 다음처럼 확인합니다.
-
-### 연결되지 않은 두 루트
-
-```text
-INIT Bob
-BRANCH other
-COMMIT first
-SWITCH other
-COMMIT second
-PATH 00000001 00000002
-```
-
-예상: `No path`. `PATH 00000001 00000001`은 자기 자신 하나를 출력합니다.
-
-### 오류 후 계속 실행
-
-```text
-LOG
-INIT Alice
-COMMIT ""
-COMMIT "Add LOGIN login"
-SEARCH login
-SEARCH log
-SWITCH missing
-LOG
-QUIT
-```
-
-예상: 초기화 전 오류, 빈 메시지 오류, login 결과 1개, log 결과 0개, 없는 브랜치 오류. 마지막 LOG에는 성공한 커밋 하나가 남습니다.
-
-알고리즘 입력만으로 확인한 다중 부모·순환·사전순 동률 사례와 CLI로 확인한 결과는 검증 기록에서 구분했습니다. Ctrl+C는 처리 코드를 검토했으며 실제 키 입력 검증에는 포함하지 않았습니다.
-
-## 9. 요구사항 충족표
-
-쪽수는 제공된 8쪽 PDF의 인쇄 페이지를 기준으로 합니다.
-
-| 요구사항 | 구분 | 원문 위치 | 구현 위치 | 검증 방법 | 상태·증거 |
-| --- | --- | --- | --- | --- | --- |
-| Python 3.10 이상, main.py·README | 필수 | 2·5·6쪽 | 전체 소스, 이 문서 | 3.10 구문 분석, 3.12 실제 실행 | 충족, 검증 기록 |
-| INIT·main·HEAD·작성자 | 필수 | 4쪽 | Repository.initialize | 초기 상태·반복 INIT | 충족 |
-| BRANCH·SWITCH | 필수 | 4쪽 | create_branch, switch_branch | 분기 후 부모·각 브랜치 위치 | 충족 |
-| COMMIT 메타데이터·유일 hash | 필수 | 3·4쪽 | Commit, Repository.commit | 2,000개 유일성·부모 확인 | 충족 |
-| DAG·복수 부모 표현·hash 직접 조회 | 필수 | 3쪽 | frozen Commit, tuple parents, commits dict | 다중 부모 그래프·위상 정렬 | 충족, 새 커밋만 기존 부모를 참조 |
-| 키워드·작성자 역색인, 생성 시 갱신 | 필수 | 3·4·5쪽 | InvertedIndex, Repository.search | 대소문자·반복 토큰·전체 순회 차단 | 충족 |
-| 정렬 직접 구현·비교 기준 변경 | 필수 | 3·4쪽 | merge_sort, Repository.log | 무작위 100종·동률·작성자·날짜 | 충족 |
-| 기본 LOG 부모 우선·필드 식별 | 필수 | 4쪽 | topological_order, print_commits | 분기·다중 부모·CLI 출력 | 충족 |
-| 날짜·작성자 옵션 LOG | 필수 | 4쪽 | handle_log, Repository.log | 오름차순·동률 순서 | 충족 |
-| 무방향 최단 PATH·No path | 필수 | 4쪽 | shortest_path, Repository.path | 형제·동일·분리 노드 | 충족 |
-| PATH 동률의 경로 문자열 사전순 최소 | 필수 | 4쪽 | shortest_path | 무작위 100그래프×36쌍을 모든 단순 경로와 대조 | 충족 |
-| 모든 조상 출력·중복 제거 | 필수 | 5쪽 | find_ancestors | 루트·공유 조상·긴 체인 | 충족 |
-| 대소문자 명령·공백 문자열·옵션·오류 | 필수 | 3쪽 | execute, require_args, 각 handler | 혼합 대소문자·한글·잘못된 인자 | 충족 |
-| REPL·exit/quit | 필수 | 2쪽 | main | 별도 프로세스, EOF·정상 종료 | 충족 |
-| 탐색·정렬·인덱싱 분리·주요 주석 | 필수 | 6쪽 | algorithms.py, index.py | 최종 소스 검토 | 충족 |
-| 표준 정렬·그래프 라이브러리 금지 | 필수 | 6쪽 | 전체 소스 | AST 검사·import 검토 | 충족 |
-| diff·merge·정렬 성능 비교 | 선택 | 5쪽 | 해당 없음 | 필수 범위와 분리 | 미구현 |
-| 데이터 영속 저장 | 선택 사항 | 6쪽 | 해당 없음 | 종료 후 메모리 소멸 | 미구현, 원문에서 면제 |

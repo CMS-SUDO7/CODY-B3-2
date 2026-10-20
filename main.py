@@ -1,104 +1,137 @@
+"""python main.py로 실행하는 Mini Git 대화형 CLI다."""
+
 import shlex
+
 from repository import Repository
 
-# 같은 형식으로 로그·검색·조상 결과를 보여 준다.
-# 저장소와 출력할 커밋 식별자 목록을 받는다.
-def print_commits(repo, commit_ids):
-    if not commit_ids:
-        print('No commits')
-    for commit_id in commit_ids:
-        commit = repo.commits[commit_id]
-        print(f"commit {commit['hash']} | {commit['author']} | {commit['timestamp']}")
-        print('  ' + commit['message'])
 
-# 잘못된 문법을 저장소 변경 전에 공통으로 검사한다.
-# 대문자 명령과 파싱된 인자 목록을 검사한다.
-def validate(command, args):
-    counts = {'INIT': 1, 'BRANCH': 1, 'SWITCH': 1, 'COMMIT': 1, 'PATH': 2, 'ANCESTORS': 1, 'SEARCH': 1, 'EXIT': 0, 'QUIT': 0}
-    if command == 'LOG':
-        if args not in ([], ['--sort-by=date'], ['--sort-by=author']):
-            raise ValueError('Invalid args')
-    elif command not in counts:
-        raise ValueError('Unknown command: ' + command)
-    elif len(args) != counts[command]:
-        raise ValueError('Invalid args')
-    if any(not arg.strip() for arg in args):
-        raise ValueError('Invalid args')
-    if command == 'SEARCH' and args[0].startswith('--'):
-        if not args[0].startswith('--author=') or not args[0][9:].strip():
-            raise ValueError('Invalid args')
+PROMPT = "mini-git> "
+AUTHOR_OPTION = "--author="
+SORT_OPTION = "--sort-by="
+HELP_TEXT = """INIT <user_name>
+BRANCH <branch_name>
+SWITCH <branch_name>
+COMMIT <message>
+LOG [--sort-by=date|author]
+PATH <commit1> <commit2>
+ANCESTORS <commit_hash>
+SEARCH <keyword> | SEARCH --author=<name>
+HELP | EXIT | QUIT
+공백이 있는 인자는 따옴표로 감싸세요. 예: COMMIT "Add login"
+"""
 
-# 한 줄 명령을 실행하고 다음 반복에서 사용할 저장소를 반환한다.
-# 검증된 명령만 받으며 종료 처리는 main에서 담당한다.
-def execute(repo, command, args):
-    if command == 'INIT':
-        if repo is not None:
-            raise ValueError('Repository already initialized')
-        repo = Repository(args[0])
-        print('Initialized repository.')
-        print('Current branch: main')
-        print('Current user: ' + repo.user)
-        return repo
-    if repo is None:
-        raise ValueError('Repository not initialized: use INIT <user_name>')
-    if command == 'BRANCH':
-        repo.branch(args[0])
-        print('Created branch: ' + args[0])
-    elif command == 'SWITCH':
-        repo.switch(args[0])
-        print('Switched to branch: ' + args[0])
-    elif command == 'COMMIT':
-        commit_id = repo.commit(args[0])
-        print(f'[{repo.current_branch} {commit_id}] {args[0]}')
-    elif command == 'LOG':
-        sort_by = None
-        if args:
-            sort_by = args[0].split('=', 1)[1]
-        print_commits(repo, repo.log(sort_by))
-    elif command == 'PATH':
-        path = repo.path(args[0], args[1])
-        if path is None:
-            print('No path')
-        else:
-            print('Path: ' + '->'.join(path))
-    elif command == 'ANCESTORS':
-        print_commits(repo, repo.ancestors(args[0]))
-    elif command == 'SEARCH':
-        query = args[0]
-        by_author = query.startswith('--author=')
-        if by_author:
-            query = query[9:]
-        found = repo.search(query, by_author)
-        print(f'Found {len(found)} commit(s):')
-        print_commits(repo, found)
-    return repo
 
-# REPL은 읽기(Read), 실행(Evaluate), 출력(Print)을 반복(Loop)한다.
-# 프로그램의 대화형 실행을 시작하는 함수이다.
+def require_args(args, count):
+    """빈 문자열·공백뿐인 인자도 잘못된 입력으로 처리한다."""
+    if len(args) != count or any(not value.strip() for value in args):
+        raise ValueError("Invalid args")
+
+
+def print_commits(commits):
+    """조회 결과는 반환값이 아니라 화면에 출력한다."""
+    if not commits:
+        print("No commits")
+        return
+    for node in commits:
+        timestamp = node.timestamp.isoformat(timespec="microseconds")
+        print(f"commit {node.hash} ({node.author}, {timestamp})")
+        print(f"  {node.message}")
+
+
+def execute(repository, line):
+    """한 줄을 해석하고 계속 실행하면 True, 종료이면 False를 준다."""
+    try:
+        tokens = shlex.split(line)
+    except ValueError:
+        raise ValueError("Invalid args") from None
+    if not tokens:
+        return True
+    command = tokens[0].upper()
+    args = tokens[1:]
+    if command in ("EXIT", "QUIT", "HELP"):
+        require_args(args, 0)
+        if command == "HELP":
+            print(HELP_TEXT)
+            return True
+        return False
+    if command == "LOG":
+        handle_log(repository, args)
+    elif command == "SEARCH":
+        handle_search(repository, args)
+    elif command == "PATH":
+        require_args(args, 2)
+        path = repository.path(args[0], args[1])
+        print("Path: " + " -> ".join(path) if path else "No path")
+    elif command in ("INIT", "BRANCH", "SWITCH", "COMMIT", "ANCESTORS"):
+        require_args(args, 1)
+        handle_single_arg(repository, command, args[0])
+    else:
+        raise ValueError(f"Unknown command: {tokens[0]}")
+    return True
+
+
+def handle_log(repository, args):
+    """옵션을 검증한 뒤 로그를 표시한다."""
+    if not args:
+        print_commits(repository.log())
+        return
+    require_args(args, 1)
+    if not args[0].startswith(SORT_OPTION):
+        raise ValueError("Invalid args")
+    sort_by = args[0][len(SORT_OPTION):]
+    print_commits(repository.log(sort_by))
+
+
+def handle_search(repository, args):
+    """키워드와 작성자 옵션을 구분하고 인덱스 조회 결과를 출력한다."""
+    require_args(args, 1)
+    value = args[0]
+    by_author = value.startswith(AUTHOR_OPTION)
+    if by_author:
+        value = value[len(AUTHOR_OPTION):]
+    elif value.startswith("--"):
+        raise ValueError("Invalid args")
+    if not value.strip():
+        raise ValueError("Invalid args")
+    results = repository.search(value, by_author)
+    print(f"Found {len(results)} commit(s)")
+    print_commits(results)
+
+
+def handle_single_arg(repository, command, value):
+    """하나의 인자를 받는 명령의 상태 변경과 결과 출력을 연결한다."""
+    if command == "INIT":
+        repository.initialize(value)
+        print("Initialized repository.")
+        print(f"Current branch: {repository.current_branch}")
+        print(f"Current user: {repository.user}")
+    elif command == "BRANCH":
+        repository.create_branch(value)
+        print(f"Created branch: {value}")
+    elif command == "SWITCH":
+        repository.switch_branch(value)
+        print(f"Switched to branch: {value}")
+    elif command == "COMMIT":
+        node = repository.commit(value)
+        print(f"[{repository.current_branch} {node.hash}] {node.message}")
+    else:
+        print_commits(repository.ancestors(value))
+
+
 def main():
-    repo = None
-    print('Mini Git | INIT <user_name> | exit / quit')
+    """입력 오류 후에도 REPL을 유지하며 EOF·Ctrl+C로 정상 종료한다."""
+    repository = Repository()
     while True:
         try:
-            line = input('mini-git> ')
-            try:
-                tokens = shlex.split(line)
-            except ValueError:
-                raise ValueError('Invalid args') from None
-            if not tokens:
-                continue
-            command = tokens[0].upper()
-            args = tokens[1:]
-            validate(command, args)
-            if command in ('EXIT', 'QUIT'):
-                print('Bye')
+            line = input(PROMPT)
+            if not execute(repository, line):
                 break
-            repo = execute(repo, command, args)
         except ValueError as error:
-            print(str(error))
+            print(error)
         except (EOFError, KeyboardInterrupt):
-            print('\nBye')
+            print()
             break
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

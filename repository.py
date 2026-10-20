@@ -1,105 +1,125 @@
-from datetime import datetime, timezone
-from algorithms import ancestor_ids, merge_sort, shortest_path, topological_order
+"""커밋과 브랜치 상태를 관리하고 알고리즘·인덱스를 연결한다."""
 
-# 저장소의 상태와 역색인을 한 객체 안에서 관리한다.
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from algorithms import find_ancestors, merge_sort, shortest_path
+from algorithms import topological_order
+from index import InvertedIndex
+
+
+DEFAULT_BRANCH = "main"
+HASH_WIDTH = 8
+
+
+@dataclass(frozen=True)
+class Commit:
+    """부모는 생성 후 바꾸지 않아 기존 그래프에 역방향 간선을 막는다."""
+
+    hash: str
+    message: str
+    author: str
+    timestamp: datetime
+    parents: tuple[str, ...]
+
+
 class Repository:
-    # Repository(user)를 만들 때 자동 실행되는 초기화 함수이다.
-    def __init__(self, user):
-        self.user = user
+    """HEAD는 현재 브랜치이며 실제 커밋은 branches에서 찾는다."""
+
+    def __init__(self):
+        self.user = None
+        self.current_branch = None
         self.commits = {}
-        self.branches = {'main': None}
-        self.current_branch = 'main'
-        self.counter = 0
+        self.branches = {}
         self.children = {}
         self.neighbors = {}
-        self.keyword_index = {}
-        self.author_index = {}
+        self.index = InvertedIndex()
+        self.next_commit_id = 1
 
-    # 현재 브랜치의 마지막 커밋을 조회하는 함수이다.
-    def head(self):
-        return self.branches[self.current_branch]
+    def require_initialized(self):
+        """초기화 전에는 상태를 변경하거나 조회하지 못하게 한다."""
+        if self.user is None:
+            raise ValueError("Repository not initialized")
 
-    # 현재 위치에서 새 브랜치를 만드는 함수이다.
-    def branch(self, name):
+    def initialize(self, user):
+        """반복 INIT는 데이터를 지우지 않고 거부한다."""
+        if self.user is not None:
+            raise ValueError("Repository already initialized")
+        self.user = user
+        self.current_branch = DEFAULT_BRANCH
+        self.branches[DEFAULT_BRANCH] = None
+
+    def create_branch(self, name):
+        """새 브랜치가 현재 브랜치의 커밋 위치를 공유하게 한다."""
+        self.require_initialized()
         if name in self.branches:
-            raise ValueError('Branch already exists: ' + name)
-        self.branches[name] = self.head()
+            raise ValueError(f"Branch already exists: {name}")
+        self.branches[name] = self.branches[self.current_branch]
 
-    # 현재 브랜치를 변경하는 함수이다.
-    def switch(self, name):
+    def switch_branch(self, name):
+        """이동만 수행하며 커밋이나 작성자를 바꾸지 않는다."""
+        self.require_initialized()
         if name not in self.branches:
-            raise ValueError('Unknown branch: ' + name)
+            raise ValueError(f"Unknown branch: {name}")
         self.current_branch = name
 
-    # 커밋 식별자가 유효한지 공통으로 검사한다.
-    def require_commit(self, commit_id):
-        if commit_id not in self.commits:
-            raise ValueError('Unknown commit: ' + commit_id)
+    def get_commit(self, commit_hash):
+        """짧은 접두사 대신 출력된 전체 hash로 정확히 조회한다."""
+        if commit_hash not in self.commits:
+            raise ValueError(f"Unknown commit: {commit_hash}")
+        return self.commits[commit_hash]
 
-    # CLI의 일반 커밋을 만드는 함수이다.
     def commit(self, message):
-        parent = self.head()
-        parents = []
-        if parent is not None:
-            parents.append(parent)
-        return self.add_commit(message, parents)
+        """현재 HEAD만 부모로 삼는 새 노드와 검색 인덱스를 등록한다."""
+        self.require_initialized()
+        parent = self.branches[self.current_branch]
+        parents = () if parent is None else (parent,)
+        # 증가 정수는 세션에서 재사용하지 않으며 폭을 넘어도 잘리지 않는다.
+        commit_hash = f"{self.next_commit_id:0{HASH_WIDTH}x}"
+        node = Commit(commit_hash, message, self.user,
+                      datetime.now(timezone.utc), parents)
+        self.next_commit_id += 1
+        self.commits[commit_hash] = node
+        self.children[commit_hash] = []
+        self.neighbors[commit_hash] = list(parents)
+        for parent_hash in parents:
+            self.children[parent_hash].append(commit_hash)
+            self.neighbors[parent_hash].append(commit_hash)
+        self.index.add(node)
+        self.branches[self.current_branch] = commit_hash
+        return node
 
-    # 기존 커밋만 부모로 받으므로 새 커밋에서 순환이 생길 수 없다.
-    # 0개 이상의 부모를 지원하는 내부 생성 함수이다. CLI는 commit을 사용한다.
-    def add_commit(self, message, parents):
-        parents = list(dict.fromkeys(parents))
-        for parent in parents:
-            self.require_commit(parent)
-        if self.counter >= 16 ** 16 - 1:
-            raise ValueError('Commit ID space exhausted')
-        self.counter += 1
-        commit_id = f'{self.counter:016x}'
-        record = {
-            'hash': commit_id,
-            'message': message,
-            'author': self.user,
-            'timestamp': datetime.now(timezone.utc).isoformat(timespec='microseconds'),
-            'parents': parents,
-        }
-        self.commits[commit_id] = record
-        self.children[commit_id] = []
-        self.neighbors[commit_id] = list(parents)
-        for parent in parents:
-            self.children[parent].append(commit_id)
-            self.neighbors[parent].append(commit_id)
-        self.author_index.setdefault(self.user, []).append(commit_id)
-        for word in set(message.lower().split()):
-            self.keyword_index.setdefault(word, []).append(commit_id)
-        self.branches[self.current_branch] = commit_id
-        return commit_id
-
-    # 전체 저장소 로그를 기본 위상 순서 또는 지정 기준으로 반환한다.
     def log(self, sort_by=None):
+        """기본은 전체 저장소 위상 순서, 옵션은 독립된 오름차순이다."""
+        self.require_initialized()
         if sort_by is None:
-            return topological_order(self.commits, self.children)
-        field = {'date': 'timestamp', 'author': 'author'}[sort_by]
-        return merge_sort(list(self.commits), lambda cid: self.commits[cid][field])
+            hashes = topological_order(self.commits, self.children)
+            return [self.commits[value] for value in hashes]
+        if sort_by not in ("date", "author"):
+            raise ValueError("Invalid args")
+        field = "timestamp" if sort_by == "date" else "author"
+        return merge_sort(list(self.commits.values()),
+                          key=lambda node: getattr(node, field))
 
-    # 두 커밋 사이 무방향 최단 경로를 구한다.
     def path(self, start, target):
-        self.require_commit(start)
-        self.require_commit(target)
+        """없는 hash와 연결되지 않은 커밋을 구분한다."""
+        self.require_initialized()
+        self.get_commit(start)
+        self.get_commit(target)
         return shortest_path(self.neighbors, start, target)
 
-    # 기준 커밋의 모든 조상을 조회한다.
-    def ancestors(self, commit_id):
-        self.require_commit(commit_id)
-        return ancestor_ids(self.commits, commit_id)
+    def ancestors(self, commit_hash):
+        """자기 자신을 제외한 조상을 DFS 방문 순서로 반환한다."""
+        self.require_initialized()
+        self.get_commit(commit_hash)
+        hashes = find_ancestors(self.commits, commit_hash)
+        return [self.commits[value] for value in hashes]
 
-    # 기본은 단어 검색이고 by_author가 참이면 작성자 검색이다.
-    def search(self, query, by_author=False):
+    def search(self, value, by_author=False):
+        """전체 커밋을 훑지 않고 인덱스에서 받은 hash만 조회한다."""
+        self.require_initialized()
         if by_author:
-            return list(self.author_index.get(query, []))
-        words = list(dict.fromkeys(query.lower().split()))
-        if not words:
-            return []
-        first = self.keyword_index.get(words[0], [])
-        candidates = set(first)
-        for word in words[1:]:
-            candidates.intersection_update(self.keyword_index.get(word, []))
-        return [cid for cid in first if cid in candidates]
+            hashes = self.index.search_author(value)
+        else:
+            hashes = self.index.search_keyword(value)
+        return [self.commits[commit_hash] for commit_hash in hashes]
